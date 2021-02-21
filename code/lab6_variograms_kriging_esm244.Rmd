@@ -1,0 +1,160 @@
+---
+title: 'Lab 6 Part 1: Spatial Variograms and Kriging'
+author: "Carlos Simms"
+date: "2/21/2021"
+output: html_document
+---
+
+### Attaching packages
+
+```{r setup, include=FALSE, messages=FALSE, warnings=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      messages = FALSE, 
+                      warnings = FALSE)
+library(tidyverse) # Default.
+library(here) # To create file paths to data within different folders.
+library(janitor) # To clean data.
+library(sf) # To read in spatial data and make simple features.
+library(tmap) # To make an interactive graph.
+library(gstat) # To use the kriging function.
+library(stars) # To make a grid of new locations where we want to make predictions for 
+```
+
+### Reading in the spatial data
+
+```{r}
+ca_dgw <- read_sf(here("ca_dgw"), 
+                  layer = "F2013_DBGS_Points_20150720_093252") %>% 
+  clean_names()
+
+st_crs(ca_dgw) # To view the reference system.
+
+ca_counties <- read_sf(here("ca_counties"), 
+                       layer = "CA_Counties_TIGER2016") %>% 
+  clean_names() %>% 
+  select(name)
+
+st_crs(ca_counties)
+
+ca_counties <- st_transform(ca_counties, 
+                            st_crs(ca_dgw))
+
+st_crs(ca_counties)
+```
+
+### Plotting the spatial data
+
+```{r}
+ggplot() + 
+  geom_sf(data = ca_counties) + 
+  geom_sf(data = ca_dgw, 
+          aes(color = dgbs))
+```
+
+### Making an interactive map
+
+```{r}
+tmap_mode("view") # To set the tmap mode to interactive viewing.
+
+tm_shape(ca_dgw) + 
+  tm_dots("dgbs") # To make a point plot.
+```
+
+### Isolating a single county
+
+```{r}
+sj_county <- ca_counties %>% 
+  filter(name == "San Joaquin")
+```
+
+### To find the intersection of data observations with a polygon
+
+```{r}
+sj_depth <- ca_dgw %>% 
+  st_intersection(sj_county) # To intersect depth to groundwater data observations with a polygon - in this case, it's "sj_county".
+
+plot(sj_depth)
+plot(sj_county)
+
+ggplot() + 
+  geom_sf(data = sj_county) + 
+  geom_sf(data = sj_depth, 
+          aes(color = dgbs))
+```
+
+### Finding and removing duplicate observations
+
+```{r}
+well_duplicates <- sj_depth %>% 
+  janitor::get_dupes(latitude, 
+                     longitude)
+
+sj_depth <- sj_depth %>% 
+  filter(!local_well %in% 
+           well_duplicates$local_well) # To keep anything that is not a local well number and that exists in that well duplicate column.
+
+sj_depth %>% 
+  janitor::get_dupes(latitude, 
+                     longitude) # This should say "0 rows", indicating that the duplicated observations were removed.
+```
+
+### Spatial interpretation via a variogram
+
+```{r}
+sj_dgw_vgm <- variogram(dgbs ~ 1, 
+                        data = sj_depth)
+
+plot(sj_dgw_vgm)
+```
+
+### Finding a model that fits the variogram
+
+```{r}
+sj_dgw_vgm_fit <- fit.variogram(sj_dgw_vgm, 
+                                model = vgm(nugget = 20, 
+                                            psill = 3000, 
+                                            range = 30, 
+                                            model = "Gau")) # To designate some model information (nugget - the measure of semivariance at very small distances, range, and sill).
+
+sj_dgw_vgm_fit
+
+plot(sj_dgw_vgm, 
+     sj_dgw_vgm_fit)
+```
+
+### Spatial kriging (interpolation)
+
+```{r}
+# Make a grid to where we will make the new calculations:
+
+sj_grid <- st_bbox(sj_county) %>% 
+  st_as_stars(dx = 0.01, 
+              dy = 0.01) %>% 
+  st_set_crs(4326) %>% 
+  st_crop(sj_county) # To crop via the outline of 'sj_county'.
+
+plot(sj_grid)
+
+sj_dgw_krige <- krige(dgbs ~ 1, 
+                      sj_depth, 
+                      sj_grid, 
+                      model = sj_dgw_vgm_fit)
+
+plot(sj_dgw_krige)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
