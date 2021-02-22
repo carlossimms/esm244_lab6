@@ -1,0 +1,195 @@
+---
+title: "ESM 244 Lab 6 Part 2: Rasters"
+author: "Carlos Simms"
+date: "2/21/2021"
+output: html_document
+---
+
+### Attaching packages
+
+```{r setup, include=TRUE, warning=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      warning = FALSE, 
+                      message = FALSE)
+library(tidyverse) # Default.
+library(here) # To create file paths to data within different folders.
+library(sf) # To read in spatial data and make simple features.
+library(raster) # To work with raster data.
+library(fasterize) # To make simple features and geometry.
+```
+
+### Reading in the raster data
+
+NOTE: Working with raster data and images on the R Bren Server 3.6 will produce chunky, pixelated raster images on the .Rmd, but will produce clean, smooth raster images when knitted to an html.
+
+```{r}
+knitr::include_graphics(here("img", 
+                             "landsat.png"))
+```
+
+### Loading in and inspecting the data
+
+```{r}
+landsat_file <- here("data", 
+                     "Landsat7.tif")
+
+ls_1 <- raster(landsat_file)
+ls_1
+```
+
+```{r}
+plot(ls_1)
+```
+
+```{r}
+ls_2 <- raster(landsat_file, 
+               band = 2)
+ls_3 <- raster(landsat_file, 
+               band = 3)
+ls_4 <- raster(landsat_file, 
+               band = 4)
+
+ls_stack <- raster::stack(landsat_file) # To read all the layers in at once.
+ls_stack
+```
+
+### Preparing the data by overwrighting the original layers
+
+```{r}
+ls_1 <- raster::aggregate(ls_1, 
+                          fact = 3, 
+                          fun = mean)
+ls_2 <- raster::aggregate(ls_2, 
+                          fact = 3, 
+                          fun = mean)
+ls_3 <- raster::aggregate(ls_3, 
+                          fact = 3, 
+                          fun = mean)
+ls_4 <- raster::aggregate(ls_4, 
+                          fact = 3, 
+                          fun = mean)
+
+plot(ls_1, 
+     col = hcl.colors(n = 100, 
+                      palette = 'Blues 2')) # To base a color scheme on a single palette.
+plot(ls_2, 
+     col = hcl.colors(n = 100, 
+                      palette = 'Greens 2'))
+plot(ls_3, 
+     col = hcl.colors(n = 100, 
+                      palette = 'Reds 2'))
+plot(ls_4, 
+     col = hcl.colors(n = 100, 
+                      palette = 'Reds 2'))
+```
+
+```{r}
+sbc_rast <- raster(here("data", 
+                        "county.tif"))
+
+plot(sbc_rast)
+
+plot(ls_3)
+
+# ERROR Code in Lab Playthrough:
+
+# mask(ls_3, sbc_rast) %>% plot()
+
+# ls_3 <- mask(ls_3, sbc_rast)
+
+# ls_4 <- mask(ls_4, sbc_rast)
+```
+
+### Working with raster algebra
+
+```{r}
+vec1 <- 1:5
+vec1
+vec1*2
+vec1^2
+
+ls_3
+ls_3*2
+log(ls_3)
+plot(ls_3); plot(log(ls_3)) # To compare.
+```
+
+```{r}
+vec2 <- 6:10
+vec1+vec2
+ls_3+ls_4
+```
+
+### Using 'raster::calc()'
+
+```{r}
+ls_stack <- stack(ls_1, 
+                  ls_2, 
+                  ls_3, 
+                  ls_4)
+
+ls_mean <- raster::calc(ls_stack, 
+                        fun = mean, 
+                        na.rm = FALSE)
+
+plot(ls_mean)
+```
+
+### Analysis: NDVI
+
+```{r}
+knitr::include_graphics(here("img", 
+                             "spectrum.png"))
+
+knitr::include_graphics(here("img", 
+                             "ir_photo.jpg"))
+```
+
+### NDVI equation
+
+$$NDVI = \frac{NIR - Red}{NIR + Red}$$
+
+```{r}
+ndvi <- (ls_4 - ls_3) / (ls_4 + ls_3)
+
+plot(ndvi, 
+     col = hcl.colors(100, 
+                      palette = 'Grays'))
+
+is_forest <- function(x, 
+                      thresh = 0.3) {
+  y <- ifelse(x >= thresh, 
+              1, 
+              NA)
+  return(y)
+}
+
+forest <- calc(ndvi, 
+               fun = is_forest)
+
+plot(forest, 
+     col = 'green')
+```
+
+### 'ggplot' and rasters
+
+```{r}
+ndvi_df <- raster::rasterToPoints(ndvi) %>% 
+  as.data.frame()
+
+forest_df <- raster::rasterToPoints(forest) %>% 
+  as.data.frame()
+
+ggplot(data = ndvi_df, 
+       aes(x = x, 
+           y = y, 
+           fill = layer)) + 
+  geom_raster() + 
+  geom_raster(data = forest_df, 
+              fill = "green") + 
+  coord_sf(expand = 0) + 
+  scale_fill_gradient(low = "black", 
+                      high = "white") + 
+  theme_void() + 
+  theme(panel.background = element_rect(fill = "slateblue4"))
+```
